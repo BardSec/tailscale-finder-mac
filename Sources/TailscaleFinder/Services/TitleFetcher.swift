@@ -26,7 +26,6 @@ struct TitleFetcher {
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 4
         config.timeoutIntervalForResource = 6
-        config.httpShouldFollowRedirects = true // Corrected: this is the default
         return URLSession(configuration: config, delegate: delegate, delegateQueue: nil)
     }()
 

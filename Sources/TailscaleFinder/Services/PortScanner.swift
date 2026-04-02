@@ -27,15 +27,13 @@ struct PortScanner {
     /// Scan all target ports on a given host
     static func scan(host: String, timeout: TimeInterval = 0.5, maxConcurrent: Int = 80) async -> [(port: Int, isHTTPS: Bool)] {
         let allPorts = Array(Set(commonWebPorts + extendedPorts)).sorted()
-        var results: [(port: Int, isHTTPS: Bool)] = []
-        let lock = NSLock()
 
-        await withTaskGroup(of: (Int, Bool)?.self) { group in
-            var launched = 0
+        let results = await withTaskGroup(of: (Int, Bool)?.self, returning: [(port: Int, isHTTPS: Bool)].self) { group in
+            var collected: [(port: Int, isHTTPS: Bool)] = []
             var index = 0
 
             // Seed initial batch
-            while index < allPorts.count && launched < maxConcurrent {
+            while index < allPorts.count && index < maxConcurrent {
                 let port = allPorts[index]
                 group.addTask {
                     let open = await probePort(host: host, port: port, timeout: timeout)
@@ -44,15 +42,12 @@ struct PortScanner {
                     }
                     return nil
                 }
-                launched += 1
                 index += 1
             }
 
             for await result in group {
                 if let r = result {
-                    lock.lock()
-                    results.append(r)
-                    lock.unlock()
+                    collected.append(r)
                 }
                 // Launch next port
                 if index < allPorts.count {
@@ -67,6 +62,8 @@ struct PortScanner {
                     index += 1
                 }
             }
+
+            return collected
         }
 
         return results.sorted { $0.port < $1.port }
@@ -79,14 +76,10 @@ struct PortScanner {
             let nwPort = NWEndpoint.Port(integerLiteral: UInt16(port))
             let connection = NWConnection(host: nwHost, port: nwPort, using: .tcp)
 
-            var resumed = false
-            let resumeLock = NSLock()
+            let resumed = LockedBool()
 
-            func safeResume(_ value: Bool) {
-                resumeLock.lock()
-                defer { resumeLock.unlock() }
-                guard !resumed else { return }
-                resumed = true
+            @Sendable func safeResume(_ value: Bool) {
+                guard resumed.testAndSet() else { return }
                 connection.cancel()
                 continuation.resume(returning: value)
             }
@@ -111,5 +104,20 @@ struct PortScanner {
                 safeResume(false)
             }
         }
+    }
+}
+
+/// Thread-safe boolean using os_unfair_lock for async-safe access
+private final class LockedBool: @unchecked Sendable {
+    private var value = false
+    private let _lock = NSLock()
+
+    /// Returns true if this is the first call (was false, now set to true)
+    func testAndSet() -> Bool {
+        _lock.lock()
+        defer { _lock.unlock() }
+        if value { return false }
+        value = true
+        return true
     }
 }
