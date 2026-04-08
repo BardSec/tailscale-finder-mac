@@ -18,7 +18,7 @@ struct ServiceRowView: View {
                         .foregroundColor(.primary)
                         .lineLimit(1)
 
-                    Text("\(service.isHTTPS ? "https" : "http")://\(hostName):\(service.port)")
+                    Text("\(service.isHTTPS ? "https" : "http")://\(hostName):\(String(service.port))")
                         .font(.caption)
                         .foregroundColor(.secondary)
                         .lineLimit(1)
@@ -26,7 +26,7 @@ struct ServiceRowView: View {
 
                 Spacer()
 
-                Text(":\(service.port)")
+                Text(":\(String(service.port))")
                     .font(.system(.caption, design: .monospaced))
                     .foregroundColor(.secondary)
                     .padding(.horizontal, 6)
