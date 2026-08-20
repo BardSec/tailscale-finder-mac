@@ -1,15 +1,19 @@
 import Foundation
+import Security
 
 enum TailscaleAPIError: Error, LocalizedError {
     case tailscaleNotRunning
     case decodingFailed(String)
+    case untrustedBinary
 
     var errorDescription: String? {
         switch self {
         case .tailscaleNotRunning:
             return "Could not connect to Tailscale. Make sure the Tailscale app is installed and running."
-        case .decodingFailed(let msg):
-            return "Failed to parse Tailscale status: \(msg)"
+        case .decodingFailed:
+            return "Failed to parse Tailscale status. The response format may have changed."
+        case .untrustedBinary:
+            return "The Tailscale binary could not be verified. Please reinstall Tailscale from the official source."
         }
     }
 }
@@ -33,9 +37,27 @@ struct TailscaleAPIClient {
         return try JSONDecoder().decode(TailscaleStatusResponse.self, from: data)
     }
 
+    /// Verify the Tailscale binary has a valid Apple code signature
+    private static func verifyCodeSignature(atPath path: String) -> Bool {
+        let url = URL(fileURLWithPath: path) as CFURL
+        var staticCode: SecStaticCode?
+
+        guard SecStaticCodeCreateWithPath(url, [], &staticCode) == errSecSuccess,
+              let code = staticCode else {
+            return false
+        }
+
+        // Validate the signature is intact and signed by a valid identity
+        return SecStaticCodeCheckValidity(code, [], nil) == errSecSuccess
+    }
+
     private static func fetchViaCLI() async throws -> TailscaleStatusResponse {
         guard FileManager.default.fileExists(atPath: cliPath) else {
             throw TailscaleAPIError.tailscaleNotRunning
+        }
+
+        guard verifyCodeSignature(atPath: cliPath) else {
+            throw TailscaleAPIError.untrustedBinary
         }
 
         let process = Process()

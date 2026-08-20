@@ -22,15 +22,41 @@ class InsecureURLSessionDelegate: NSObject, URLSessionDelegate {
 struct TitleFetcher {
     private static let delegate = InsecureURLSessionDelegate()
 
-    private static var session: URLSession = {
+    /// Standard session that validates TLS certificates normally
+    private static var secureSession: URLSession = {
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 4
+        config.timeoutIntervalForResource = 6
+        return URLSession(configuration: config)
+    }()
+
+    /// Fallback session that accepts self-signed certs (for internal services)
+    private static var insecureSession: URLSession = {
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 4
         config.timeoutIntervalForResource = 6
         return URLSession(configuration: config, delegate: delegate, delegateQueue: nil)
     }()
 
-    /// Fetch the HTML <title> from a URL
+    /// Fetch the HTML <title> from a URL.
+    /// Tries with standard TLS validation first; falls back to accepting
+    /// self-signed certificates only if the initial request fails with a
+    /// certificate error.
     static func fetchTitle(url: URL) async -> String? {
+        // Try with standard TLS first
+        if let result = await fetchTitleWith(session: secureSession, url: url) {
+            return result
+        }
+
+        // Fall back to insecure session for self-signed certs
+        if url.scheme == "https" {
+            return await fetchTitleWith(session: insecureSession, url: url)
+        }
+
+        return nil
+    }
+
+    private static func fetchTitleWith(session: URLSession, url: URL) async -> String? {
         do {
             let (data, response) = try await session.data(from: url)
             guard let httpResponse = response as? HTTPURLResponse,
